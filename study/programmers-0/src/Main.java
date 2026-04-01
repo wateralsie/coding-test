@@ -4,7 +4,7 @@ import java.util.Arrays;
 // click the <icon src="AllIcons.Actions.Execute"/> icon in the gutter.
 public class Main {
     public static void main(String[] args) {
-        MostFrequent mf = new MostFrequent();
-        System.out.println(mf.mySolution(new int[]{1, 2, 3, 3, 3, 4}));
+        LetterRepeatPrint lrp = new LetterRepeatPrint();
+        System.out.println(lrp.mySolution("hello", 3));
     }
 }
