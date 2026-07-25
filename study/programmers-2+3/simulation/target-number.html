@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>타겟넘버 DFS 시각화</title>
+<style>
+  :root{
+    --bg:#ffffff; --surface:#f5f4ef; --surface2:#ffffff;
+    --text:#2c2c2a; --text2:#5f5e5a; --border:#d3d1c7;
+    --accent:#185fa5;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#1a1a18; --surface:#26251f; --surface2:#302f28;
+      --text:#e8e6dd; --text2:#a8a69c; --border:#44443f;
+      --accent:#85b7eb;
+    }
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0; padding:24px; background:var(--bg); color:var(--text);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+    line-height:1.6;
+  }
+  .wrap{max-width:960px;margin:0 auto}
+  h1{font-size:20px;font-weight:600;margin:0 0 4px}
+  .sub{font-size:13px;color:var(--text2);margin:0 0 20px}
+  .controls{display:flex;align-items:center;gap:10px;margin:0 0 14px;flex-wrap:wrap}
+  button{
+    font:inherit;font-size:14px;padding:7px 14px;border-radius:8px;
+    border:1px solid var(--border);background:var(--surface2);color:var(--text);
+    cursor:pointer;transition:background .15s,transform .05s;
+  }
+  button:hover{background:var(--surface)}
+  button:active{transform:scale(.97)}
+  .controls label{font-size:13px;color:var(--text2);display:flex;align-items:center;gap:8px}
+  input[type=range]{accent-color:var(--accent)}
+  .legend{display:flex;align-items:center;gap:16px;margin:0 0 12px;font-size:12px;color:var(--text2);flex-wrap:wrap}
+  .legend span{display:flex;align-items:center;gap:6px}
+  .sw{width:12px;height:12px;border-radius:3px;display:inline-block}
+  .treebox{background:var(--surface);border-radius:12px;padding:12px;overflow:hidden}
+  svg{display:block;width:100%;height:auto}
+  .foot{display:flex;gap:12px;margin:16px 0 0;align-items:stretch;flex-wrap:wrap}
+  .stat{background:var(--surface);border-radius:8px;padding:8px 16px;min-width:80px}
+  .stat .k{font-size:12px;color:var(--text2)}
+  .stat .v{font-size:26px;font-weight:600;color:var(--accent)}
+  .status{flex:1;min-width:240px;font-size:14px;color:var(--text2);display:flex;align-items:center;background:var(--surface);border-radius:8px;padding:8px 16px}
+  .hint{font-size:12px;color:var(--text2);margin:14px 0 0}
+  code{background:var(--surface);padding:2px 6px;border-radius:4px;font-size:13px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>타겟넘버 DFS 시각화</h1>
+  <p class="sub">numbers = [1, 1, 1, 1, 1], target = 3 · 노드는 <code>index, sum</code> 순서</p>
+
+  <div class="controls">
+    <button id="play">▶ 재생</button>
+    <button id="step">→ 한 칸</button>
+    <button id="reset">↻ 처음으로</button>
+    <label style="margin-left:auto">속도
+      <input type="range" id="speed" min="120" max="900" value="380" step="20" style="width:120px">
+    </label>
+  </div>
+
+  <div class="legend">
+    <span><span class="sw" style="background:#1D9E75"></span>진입</span>
+    <span><span class="sw" style="background:#9FE1CB"></span>지나옴</span>
+    <span><span class="sw" style="background:#7F77DD"></span>정답 잎 (sum=3)</span>
+    <span><span class="sw" style="background:#B4B2A9"></span>탈락 잎</span>
+    <span><span class="sw" style="background:#D4537E"></span>되돌아감</span>
+  </div>
+
+  <div class="treebox">
+    <svg id="tree" viewBox="0 0 680 470" preserveAspectRatio="xMidYMid meet" role="img" aria-label="타겟넘버 DFS 재귀 트리">
+      <g id="edges"></g>
+      <g id="nodes"></g>
+    </svg>
+  </div>
+
+  <div class="foot">
+    <div class="stat"><div class="k">answer</div><div class="v" id="ans">0</div></div>
+    <div class="status" id="status">재생을 누르면 dfs(0, 0)부터 시작합니다.</div>
+  </div>
+
+  <p class="hint">브라우저 확대·축소(<code>Cmd/Ctrl</code> + <code>+</code> / <code>-</code>)에 트리 크기가 함께 맞춰집니다.</p>
+</div>
+
+<script>
+(function(){
+  const NUMS=[1,1,1,1,1], TARGET=3;
+  const nodes=[], edges=[];
+  const W=680;
+
+  function build(i,sum,x,depth,parent,op){
+    const y=30+depth*72;
+    const id=nodes.length;
+    nodes.push({id,i,sum,x,y,parent,op,children:[]});
+    if(parent!==null){nodes[parent].children.push(id); edges.push({from:parent,to:id,op});}
+    if(i<NUMS.length){
+      const spread=W/Math.pow(2,depth+2);
+      build(i+1,sum+NUMS[i],x-spread,depth+1,id,'+');
+      build(i+1,sum-NUMS[i],x+spread,depth+1,id,'-');
+    }
+    return id;
+  }
+  build(0,0,W/2,0,null,null);
+
+  const seq=[];
+  function dfs(id){
+    seq.push({type:'enter',id});
+    const n=nodes[id];
+    if(n.i>=NUMS.length){seq.push({type:'leaf',id}); return;}
+    for(const c of n.children){
+      seq.push({type:'down',from:id,to:c});
+      dfs(c);
+      seq.push({type:'back',from:c,to:id});
+    }
+  }
+  dfs(0);
+
+  const NS='http://www.w3.org/2000/svg';
+  const eG=document.getElementById('edges'), nG=document.getElementById('nodes');
+  edges.forEach(e=>{
+    const a=nodes[e.from], b=nodes[e.to];
+    const l=document.createElementNS(NS,'line');
+    l.setAttribute('x1',a.x);l.setAttribute('y1',a.y+11);
+    l.setAttribute('x2',b.x);l.setAttribute('y2',b.y-11);
+    l.setAttribute('stroke','#c8c6bc');l.setAttribute('stroke-width','1.2');
+    l.setAttribute('id','e'+e.from+'_'+e.to);
+    eG.appendChild(l);
+  });
+
+  const leafCount=nodes.filter(n=>n.i>=NUMS.length).length;
+  const okCount=nodes.filter(n=>n.i>=NUMS.length&&n.sum===TARGET).length;
+
+  nodes.forEach(n=>{
+    const leaf=n.i>=NUMS.length;
+    const g=document.createElementNS(NS,'g');
+    g.setAttribute('id','n'+n.id);
+    const w=leaf?40:44,h=24;
+    const r=document.createElementNS(NS,'rect');
+    r.setAttribute('x',n.x-w/2);r.setAttribute('y',n.y-h/2);
+    r.setAttribute('width',w);r.setAttribute('height',h);r.setAttribute('rx',5);
+    r.setAttribute('fill','var(--surface2)');
+    r.setAttribute('stroke','#B4B2A9');r.setAttribute('stroke-width','1.2');
+    r.setAttribute('class','nrect');
+    g.appendChild(r);
+    const t=document.createElementNS(NS,'text');
+    t.setAttribute('x',n.x);t.setAttribute('y',n.y);
+    t.setAttribute('text-anchor','middle');t.setAttribute('dominant-baseline','central');
+    t.setAttribute('font-size','11');t.setAttribute('font-weight','600');
+    t.setAttribute('fill','var(--text)');t.setAttribute('class','ntext');
+    t.textContent=n.i+', '+n.sum;
+    g.appendChild(t);
+    nG.appendChild(g);
+  });
+
+  let step=0, playing=false, timer=null, answer=0;
+  const statusEl=document.getElementById('status');
+  const ansEl=document.getElementById('ans');
+  const playBtn=document.getElementById('play');
+
+  function setNode(id,fill,stroke,textFill){
+    const g=document.getElementById('n'+id);
+    g.querySelector('.nrect').setAttribute('fill',fill);
+    g.querySelector('.nrect').setAttribute('stroke',stroke);
+    g.querySelector('.ntext').setAttribute('fill',textFill);
+  }
+  function setEdge(from,to,color,width){
+    const l=document.getElementById('e'+from+'_'+to);
+    if(l){l.setAttribute('stroke',color);l.setAttribute('stroke-width',width);}
+  }
+
+  function reset(){
+    step=0; answer=0; ansEl.textContent='0'; pause();
+    nodes.forEach(n=>setNode(n.id,'var(--surface2)','#B4B2A9','var(--text)'));
+    edges.forEach(e=>setEdge(e.from,e.to,'#c8c6bc','1.2'));
+    statusEl.textContent='재생을 누르면 dfs(0, 0)부터 시작합니다.';
+  }
+
+  function apply(a){
+    const spd=+document.getElementById('speed').value;
+    if(a.type==='enter'){
+      const n=nodes[a.id];
+      if(n.i<NUMS.length) setNode(a.id,'#1D9E75','#0F6E56','#ffffff');
+      statusEl.textContent='dfs('+n.i+', '+n.sum+') 진입';
+    }else if(a.type==='down'){
+      setEdge(a.from,a.to,'#1D9E75','2.2');
+      setNode(a.from,'#9FE1CB','#0F6E56','#04342C');
+    }else if(a.type==='leaf'){
+      const n=nodes[a.id];
+      if(n.sum===TARGET){
+        setNode(a.id,'#7F77DD','#534AB7','#ffffff');
+        answer++; ansEl.textContent=answer;
+        statusEl.textContent='잎 도달: index='+n.i+', sum='+n.sum+' === target(3) → answer++ ('+answer+')';
+      }else{
+        setNode(a.id,'#B4B2A9','#5F5E5A','#ffffff');
+        statusEl.textContent='잎 도달: index='+n.i+', sum='+n.sum+' ≠ 3 → 그냥 return';
+      }
+    }else if(a.type==='back'){
+      setEdge(a.to,a.from,'#D4537E','2');
+      setNode(a.from,'#9FE1CB','#0F6E56','#04342C');
+      if(nodes[a.to].i<NUMS.length) setNode(a.to,'#9FE1CB','#0F6E56','#04342C');
+      statusEl.textContent='return → 부모로 되돌아감 (백트래킹)';
+      setTimeout(()=>setEdge(a.to,a.from,'#9FE1CB','1.2'),Math.min(300,spd-60));
+    }
+  }
+
+  function next(){
+    if(step>=seq.length){
+      pause();
+      statusEl.textContent='끝! 잎 '+leafCount+'개 전부 방문, 그중 sum=3인 잎 '+okCount+'개 → answer = '+okCount;
+      return false;
+    }
+    apply(seq[step]); step++; return true;
+  }
+  function play(){
+    playing=true; playBtn.textContent='❚❚ 일시정지';
+    const tick=()=>{ if(!playing)return; if(!next()){pause();return;} timer=setTimeout(tick,+document.getElementById('speed').value); };
+    tick();
+  }
+  function pause(){ playing=false; clearTimeout(timer); playBtn.textContent='▶ 재생'; }
+
+  playBtn.onclick=()=>{ if(playing)pause(); else{ if(step>=seq.length)reset(); play(); } };
+  document.getElementById('step').onclick=()=>{ pause(); if(step>=seq.length)reset(); next(); };
+  document.getElementById('reset').onclick=reset;
+
+  reset();
+})();
+</script>
+</body>
+</html>
