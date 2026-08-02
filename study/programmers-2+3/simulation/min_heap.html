@@ -1,0 +1,318 @@
+<div style="padding: 1rem 0;">
+
+  <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:1rem;">
+    <input type="number" id="val" placeholder="숫자" style="width:90px;" />
+    <button id="pushBtn"><i class="ti ti-plus" aria-hidden="true"></i> push</button>
+    <button id="popBtn"><i class="ti ti-arrow-up" aria-hidden="true"></i> pop (최솟값)</button>
+    <button id="resetBtn"><i class="ti ti-refresh" aria-hidden="true"></i> 리셋</button>
+    <button id="randBtn"><i class="ti ti-dice" aria-hidden="true"></i> 랜덤</button>
+  </div>
+
+  <div id="status" style="min-height:44px; background:var(--surface-1); border-radius:var(--radius); padding:10px 14px; font-size:14px; color:var(--text-primary); margin-bottom:1rem; display:flex; align-items:center; gap:8px;">
+    <span id="statusText">숫자를 넣고 push를 눌러봐. 아래에서 노드를 클릭하면 인덱스 계산이 펼쳐져.</span>
+  </div>
+
+  <div id="stepBar" style="display:none; gap:8px; align-items:center; margin-bottom:1rem;">
+    <button id="stepBtn" style="border-color:var(--border-accent); color:var(--text-accent);"><i class="ti ti-player-play" aria-hidden="true"></i> 다음 단계</button>
+    <span id="stepInfo" style="font-size:13px; color:var(--text-secondary);"></span>
+  </div>
+
+  <div style="position:relative; margin-bottom:1.5rem;">
+    <svg id="tree" viewBox="0 0 680 300" style="width:100%; height:auto; background:var(--surface-0); border-radius:12px; border:0.5px solid var(--border);"></svg>
+  </div>
+
+  <div style="font-size:13px; color:var(--text-secondary); margin-bottom:6px;">배열 저장 형태 — 셀을 클릭하면 그 인덱스의 부모·자식 계산이 나와</div>
+  <div id="array" style="display:flex; gap:6px; flex-wrap:wrap; margin-bottom:12px;"></div>
+
+  <div id="mathPanel" style="background:var(--surface-1); border-radius:12px; padding:14px 16px; font-size:14px; color:var(--text-primary); line-height:1.9;">
+    <span style="color:var(--text-muted);">노드나 배열 셀을 클릭하면 여기에 인덱스 산수가 표시돼.</span>
+  </div>
+
+</div>
+
+<script>
+(function(){
+  var heap = [];
+  var animating = false;
+  var steps = [];
+  var stepPos = 0;
+  var highlight = {};
+  var selected = null;
+
+  var svg = document.getElementById('tree');
+  var arrayEl = document.getElementById('array');
+  var statusText = document.getElementById('statusText');
+  var stepBar = document.getElementById('stepBar');
+  var stepBtn = document.getElementById('stepBtn');
+  var stepInfo = document.getElementById('stepInfo');
+  var mathPanel = document.getElementById('mathPanel');
+
+  var COLORS = {
+    normal: { fill:'#E6F1FB', stroke:'#378ADD', text:'#0C447C' },
+    active: { fill:'#FAC775', stroke:'#BA7517', text:'#633806' },
+    compare:{ fill:'#F5C4B3', stroke:'#D85A30', text:'#712B13' },
+    settled:{ fill:'#9FE1CB', stroke:'#0F6E56', text:'#085041' },
+    sel:    { fill:'#CECBF6', stroke:'#534AB7', text:'#26215C' }
+  };
+
+  function parent(i){ return Math.floor((i-1)/2); }
+  function left(i){ return 2*i+1; }
+  function right(i){ return 2*i+2; }
+
+  function nodePos(i){
+    var depth = Math.floor(Math.log2(i+1));
+    var levelStart = Math.pow(2, depth) - 1;
+    var posInLevel = i - levelStart;
+    var nodesInLevel = Math.pow(2, depth);
+    var w = 680;
+    var x = w * (posInLevel + 0.5) / nodesInLevel;
+    var y = 42 + depth * 72;
+    return { x:x, y:y };
+  }
+
+  function stateOf(i){
+    if(highlight[i]) return highlight[i];
+    if(selected===i) return 'sel';
+    return 'normal';
+  }
+
+  function render(){
+    svg.innerHTML = '';
+    if(heap.length === 0){
+      var t = document.createElementNS('http://www.w3.org/2000/svg','text');
+      t.setAttribute('x', 340); t.setAttribute('y', 150);
+      t.setAttribute('text-anchor','middle');
+      t.setAttribute('fill','var(--text-muted)');
+      t.setAttribute('font-size','15');
+      t.textContent = '빈 힙';
+      svg.appendChild(t);
+    }
+    for(var i=0;i<heap.length;i++){
+      var p = nodePos(i);
+      if(i>0){
+        var pp = nodePos(parent(i));
+        var line = document.createElementNS('http://www.w3.org/2000/svg','line');
+        line.setAttribute('x1',pp.x); line.setAttribute('y1',pp.y);
+        line.setAttribute('x2',p.x); line.setAttribute('y2',p.y);
+        line.setAttribute('stroke','var(--border-strong)');
+        line.setAttribute('stroke-width','1.5');
+        svg.appendChild(line);
+      }
+    }
+    for(var i=0;i<heap.length;i++){
+      (function(i){
+        var p = nodePos(i);
+        var c = COLORS[stateOf(i)];
+        var circle = document.createElementNS('http://www.w3.org/2000/svg','circle');
+        circle.setAttribute('cx',p.x); circle.setAttribute('cy',p.y);
+        circle.setAttribute('r','22');
+        circle.setAttribute('fill',c.fill);
+        circle.setAttribute('stroke',c.stroke);
+        circle.setAttribute('stroke-width','2');
+        circle.style.cursor='pointer';
+        circle.addEventListener('click',function(){ selectNode(i); });
+        svg.appendChild(circle);
+        var t = document.createElementNS('http://www.w3.org/2000/svg','text');
+        t.setAttribute('x',p.x); t.setAttribute('y',p.y+5);
+        t.setAttribute('text-anchor','middle');
+        t.setAttribute('fill',c.text);
+        t.setAttribute('font-size','15');
+        t.setAttribute('font-weight','500');
+        t.style.cursor='pointer';
+        t.style.pointerEvents='none';
+        t.textContent = heap[i];
+        svg.appendChild(t);
+        var it = document.createElementNS('http://www.w3.org/2000/svg','text');
+        it.setAttribute('x',p.x); it.setAttribute('y',p.y-30);
+        it.setAttribute('text-anchor','middle');
+        it.setAttribute('fill','var(--text-muted)');
+        it.setAttribute('font-size','11');
+        it.textContent = 'i='+i;
+        svg.appendChild(it);
+      })(i);
+    }
+    renderArray();
+  }
+
+  function renderArray(){
+    arrayEl.innerHTML = '';
+    if(heap.length===0){
+      arrayEl.innerHTML = '<span style="font-size:13px;color:var(--text-muted);">[ ]</span>';
+      return;
+    }
+    for(var i=0;i<heap.length;i++){
+      (function(i){
+        var c = COLORS[stateOf(i)];
+        var cell = document.createElement('div');
+        cell.style.cssText = 'display:flex;flex-direction:column;align-items:center;min-width:44px;cursor:pointer;';
+        var box = document.createElement('div');
+        box.style.cssText = 'width:44px;height:40px;display:flex;align-items:center;justify-content:center;border-radius:var(--radius);font-size:15px;font-weight:500;border:2px solid '+c.stroke+';background:'+c.fill+';color:'+c.text+';';
+        box.textContent = heap[i];
+        var idx = document.createElement('div');
+        idx.style.cssText = 'font-size:11px;color:var(--text-muted);margin-top:3px;';
+        idx.textContent = i;
+        cell.appendChild(box); cell.appendChild(idx);
+        cell.addEventListener('click',function(){ selectNode(i); });
+        arrayEl.appendChild(cell);
+      })(i);
+    }
+  }
+
+  function fmt(i, role, color){
+    return '<span style="color:'+color+';font-weight:500;">'+role+'</span>';
+  }
+
+  function selectNode(i){
+    if(animating) return;
+    selected = i;
+    var n = heap.length;
+    var par = parent(i);
+    var l = left(i), r = right(i);
+    var html = '';
+    html += '<div style="font-weight:500;margin-bottom:8px;">선택: i='+i+' (값 '+heap[i]+')</div>';
+
+    if(i===0){
+      html += '<div><span style="color:#534AB7;font-weight:500;">부모</span> = ⌊(i−1)/2⌋ = Math.floor(('+i+'−1)/2) = Math.floor('+((i-1)/2)+') = <b>'+par+'</b> → 루트라서 부모 없음 (i=0)</div>';
+    } else {
+      html += '<div><span style="color:#534AB7;font-weight:500;">부모</span> = ⌊(i−1)/2⌋ = Math.floor(('+i+'−1)/2) = Math.floor('+((i-1)/2)+') = <b>'+par+'</b> (값 '+heap[par]+')</div>';
+    }
+
+    var lStr = '<div><span style="color:#0F6E56;font-weight:500;">왼자식</span> = 2i+1 = 2×'+i+'+1 = <b>'+l+'</b>';
+    if(l < n) lStr += ' (값 '+heap[l]+')</div>';
+    else lStr += ' → 배열 범위 밖 (길이 '+n+'), 자식 없음</div>';
+    html += lStr;
+
+    var rStr = '<div><span style="color:#D85A30;font-weight:500;">오른자식</span> = 2i+2 = 2×'+i+'+2 = <b>'+r+'</b>';
+    if(r < n) rStr += ' (값 '+heap[r]+')</div>';
+    else rStr += ' → 배열 범위 밖 (길이 '+n+'), 자식 없음</div>';
+    html += rStr;
+
+    mathPanel.innerHTML = html;
+    render();
+  }
+
+  function setStatus(msg){ statusText.innerHTML = msg; }
+
+  function startSteps(newSteps, doneMsg){
+    steps = newSteps; stepPos = 0; selected = null;
+    stepBar.style.display = 'flex';
+    stepInfo.textContent = '단계 1 / ' + steps.length;
+    steps._doneMsg = doneMsg;
+    runStep();
+  }
+
+  function runStep(){
+    if(stepPos >= steps.length){
+      stepBar.style.display = 'none';
+      highlight = {}; render();
+      setStatus(steps._doneMsg);
+      animating = false;
+      return;
+    }
+    var s = steps[stepPos];
+    highlight = s.highlight;
+    heap = s.heap.slice();
+    render();
+    setStatus(s.msg);
+    stepInfo.textContent = '단계 ' + (stepPos+1) + ' / ' + steps.length;
+    stepPos++;
+  }
+
+  stepBtn.onclick = function(){ runStep(); };
+
+  function doPush(v){
+    if(animating) return;
+    animating = true;
+    var work = heap.slice();
+    var newSteps = [];
+    work.push(v);
+    var i = work.length - 1;
+    newSteps.push({
+      heap: work.slice(),
+      highlight: (function(){var h={};h[i]='active';return h;})(),
+      msg: '<b>'+v+'</b>를 배열 맨 뒤 (i='+i+')에 넣었어. 부모와 비교하며 위로 올라가.'
+    });
+    while(i>0){
+      var par = parent(i);
+      var h1 = {}; h1[i]='active'; h1[par]='compare';
+      newSteps.push({
+        heap: work.slice(),
+        highlight: h1,
+        msg: '부모 = ⌊('+i+'−1)/2⌋ = '+par+'. 자식('+work[i]+') vs 부모('+work[par]+') → ' + (work[i] < work[par] ? '자식이 작으니 <b>교환</b>.' : '자식이 크거나 같으니 <b>멈춤</b>.')
+      });
+      if(work[i] < work[par]){
+        var tmp = work[i]; work[i]=work[par]; work[par]=tmp;
+        var h2 = {}; h2[par]='active'; h2[i]='settled';
+        newSteps.push({ heap: work.slice(), highlight: h2, msg: '교환 완료. '+work[par]+'가 i='+par+'로 올라갔어.' });
+        i = par;
+      } else break;
+    }
+    heap = work.slice();
+    startSteps(newSteps, '<b>push 완료.</b> 최솟값('+heap[0]+')이 루트(i=0)에 있어. 노드를 클릭해 인덱스 계산을 확인해봐.');
+  }
+
+  function doPop(){
+    if(animating) return;
+    if(heap.length===0){ setStatus('빈 힙이라 꺼낼 게 없어.'); return; }
+    animating = true;
+    var work = heap.slice();
+    var newSteps = [];
+    var top = work[0];
+    if(work.length===1){
+      work.pop(); heap = [];
+      startSteps([{heap:[],highlight:{},msg:'마지막 원소 '+top+'를 꺼냈어.'}], '<b>pop 완료.</b> 최솟값 '+top+' 반환.');
+      return;
+    }
+    var last = work[work.length-1];
+    newSteps.push({ heap: work.slice(), highlight:(function(){var h={};h[0]='active';return h;})(), msg:'루트('+top+')가 최솟값. 꺼내고 맨 뒤('+last+')를 루트로 옮겨.' });
+    work[0] = last; work.pop();
+    newSteps.push({ heap: work.slice(), highlight:(function(){var h={};h[0]='active';return h;})(), msg:'맨 뒤 '+last+'를 루트(i=0)로. 자식과 비교하며 내려가.' });
+    var i = 0, n = work.length;
+    while(true){
+      var l = left(i), r = right(i), smallest = i;
+      var hc = {}; hc[i]='active';
+      if(l<n) hc[l]='compare';
+      if(r<n) hc[r]='compare';
+      var cmsg = '왼자식 = 2×'+i+'+1 = '+l+(l<n?'(값 '+work[l]+')':'(없음)')+', 오른자식 = 2×'+i+'+2 = '+r+(r<n?'(값 '+work[r]+')':'(없음)')+'.';
+      newSteps.push({ heap: work.slice(), highlight: hc, msg: cmsg });
+      if(l<n && work[l]<work[smallest]) smallest=l;
+      if(r<n && work[r]<work[smallest]) smallest=r;
+      if(smallest===i){
+        newSteps.push({ heap: work.slice(), highlight:(function(){var h={};h[i]='settled';return h;})(), msg:'부모('+work[i]+')가 자식들보다 작거나 같아. <b>멈춤</b>.' });
+        break;
+      }
+      var tmp = work[i]; work[i]=work[smallest]; work[smallest]=tmp;
+      var h2 = {}; h2[smallest]='active'; h2[i]='settled';
+      newSteps.push({ heap: work.slice(), highlight: h2, msg:'더 작은 자식과 교환. '+work[i]+'가 i='+i+'로 내려갔어.' });
+      i = smallest;
+    }
+    heap = work.slice();
+    startSteps(newSteps, '<b>pop 완료.</b> 최솟값 '+top+' 반환. 새 최솟값은 '+(heap.length?heap[0]:'없음')+'.');
+  }
+
+  document.getElementById('pushBtn').onclick = function(){
+    var raw = document.getElementById('val').value;
+    if(raw===''){ setStatus('먼저 숫자를 입력해줘.'); return; }
+    var v = parseInt(raw,10);
+    if(isNaN(v)){ setStatus('숫자만 넣어줘.'); return; }
+    document.getElementById('val').value='';
+    doPush(v);
+  };
+  document.getElementById('popBtn').onclick = function(){ doPop(); };
+  document.getElementById('resetBtn').onclick = function(){
+    if(animating) return;
+    heap = []; highlight = {}; selected=null; render();
+    mathPanel.innerHTML = '<span style="color:var(--text-muted);">노드나 배열 셀을 클릭하면 여기에 인덱스 산수가 표시돼.</span>';
+    setStatus('힙을 비웠어.'); stepBar.style.display='none';
+  };
+  document.getElementById('randBtn').onclick = function(){
+    if(animating) return;
+    document.getElementById('val').value = Math.floor(Math.random()*99)+1;
+  };
+  document.getElementById('val').addEventListener('keydown', function(e){
+    if(e.key==='Enter') document.getElementById('pushBtn').click();
+  });
+
+  render();
+})();
+</script>
